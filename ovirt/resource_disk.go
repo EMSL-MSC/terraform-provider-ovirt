@@ -18,6 +18,11 @@ func resourceDisk() *schema.Resource {
 				Required: true,
 				ForceNew: true,
 			},
+			"bootable": {
+				Type:     schema.TypeBool,
+				Optional: true,
+				ForceNew: true,
+			},
 			"format": {
 				Type:     schema.TypeString,
 				Required: true,
@@ -69,6 +74,9 @@ func resourceDiskModify(d *schema.ResourceData, disk *ovirtapi.Disk) error {
 		ID: d.Get("storage_domain_id").(string),
 	})
 	disk.StorageDomains = &storageDomains
+	if d.Get("bootable").(bool) {
+		disk.Bootable = "false"
+	}
 	if d.Get("shareable").(bool) {
 		disk.Shareable = "true"
 	}
@@ -87,6 +95,8 @@ func resourceDiskRead(d *schema.ResourceData, meta interface{}) error {
 	}
 
 	d.Set("name", disk.Name)
+	bootable, _ := strconv.ParseBool(disk.Bootable)
+	d.Set("bootable", bootable)
 	d.Set("size", disk.ProvisionedSize)
 	d.Set("format", disk.Format)
 	d.Set("storage_domain_id", disk.StorageDomains.StorageDomain[0].ID)
