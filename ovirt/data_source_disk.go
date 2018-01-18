@@ -15,6 +15,10 @@ func dataSourceDisk() *schema.Resource {
 				Type:     schema.TypeString,
 				Required: true,
 			},
+			"bootable": {
+				Type:     schema.TypeBool,
+				Optional: true,
+			},
 			"format": {
 				Type:     schema.TypeString,
 				Optional: true,
@@ -48,6 +52,7 @@ func dataSourceDiskRead(d *schema.ResourceData, meta interface{}) error {
 	}
 
 	d.Set("name", disk.Name)
+	d.Set("bootable", disk.Bootable)
 	d.Set("size", disk.ProvisionedSize)
 	d.Set("format", disk.Format)
 	d.Set("storage_domain_id", disk.StorageDomains.StorageDomain[0].ID)
