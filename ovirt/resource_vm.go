@@ -104,6 +104,8 @@ func resourceVMCreate(d *schema.ResourceData, meta interface{}) error {
 	template := con.NewTemplate()
 	template.Name = d.Get("template").(string)
 	newVM.Template = template
+        newVM.CPU = &ovirtapi.CPU{}
+        newVM.CPU.Topology = &ovirtapi.CPUTopology{}
 	newVM.CPU.Topology.Cores = d.Get("cores").(int)
 	newVM.CPU.Topology.Sockets = d.Get("sockets").(int)
 	newVM.CPU.Topology.Threads = d.Get("threads").(int)
