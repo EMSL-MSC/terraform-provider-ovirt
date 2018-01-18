@@ -104,12 +104,13 @@ func resourceVMCreate(d *schema.ResourceData, meta interface{}) error {
 	template := con.NewTemplate()
 	template.Name = d.Get("template").(string)
 	newVM.Template = template
-        newVM.CPU = &ovirtapi.CPU{}
-        newVM.CPU.Topology = &ovirtapi.CPUTopology{}
-	newVM.CPU.Topology.Cores = d.Get("cores").(int)
-	newVM.CPU.Topology.Sockets = d.Get("sockets").(int)
-	newVM.CPU.Topology.Threads = d.Get("threads").(int)
-
+        newVM.CPU = &ovirtapi.CPU{
+            Topology: &ovirtapi.CPUTopology{
+	        Cores: d.Get("cores").(int),
+	        Sockets: d.Get("sockets").(int),
+	        Threads: d.Get("threads").(int),
+            },
+        }
 	newVM.Initialization = &ovirtapi.Initialization{}
 
 	newVM.Initialization.AuthorizedSSHKeys = d.Get("authorized_ssh_key").(string)
