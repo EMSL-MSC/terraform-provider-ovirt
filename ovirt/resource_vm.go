@@ -1,7 +1,7 @@
 package ovirt
 
 import (
-	"fmt"
+	"log"
 	"strconv"
 	"time"
 
@@ -37,14 +37,17 @@ func resourceVM() *schema.Resource {
 			"cores": {
 				Type:     schema.TypeInt,
 				Optional: true,
+				Default:  1,
 			},
 			"sockets": {
 				Type:     schema.TypeInt,
 				Optional: true,
+				Default:  1,
 			},
 			"threads": {
 				Type:     schema.TypeInt,
 				Optional: true,
+				Default:  1,
 			},
 			"authorized_ssh_key": {
 				Type:     schema.TypeString,
@@ -52,7 +55,7 @@ func resourceVM() *schema.Resource {
 				Default:  "",
 			},
 			"network_interface": {
-				Type:     schema.TypeList,
+				Type:     schema.TypeSet,
 				Required: true,
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
@@ -93,6 +96,10 @@ func resourceVM() *schema.Resource {
 				Optional: true,
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
+						"attach_id": &schema.Schema{
+							Type:     schema.TypeString,
+							Computed: true,
+						},
 						"disk_id": &schema.Schema{
 							Type:     schema.TypeString,
 							Required: true,
@@ -161,22 +168,22 @@ func resourceVMCreate(d *schema.ResourceData, meta interface{}) error {
 
 	numNetworks := d.Get("network_interface.#").(int)
 	NICConfigurations := make([]ovirtapi.NICConfiguration, numNetworks)
-	for i := 0; i < numNetworks; i++ {
-		prefix := fmt.Sprintf("network_interface.%d", i)
-		_ = prefix
+	networkInterfaces := d.Get("network_interface").(*schema.Set)
+	for i, v := range networkInterfaces.List() {
+		networkInterface := v.(map[string]interface{})
 		NICConfigurations[i] = ovirtapi.NICConfiguration{
 			IP: &ovirtapi.IP{
-				Address: d.Get(prefix + ".ip_address").(string),
-				Netmask: d.Get(prefix + ".subnet_mask").(string),
-				Gateway: d.Get(prefix + ".gateway").(string),
+				Address: networkInterface["ip_address"].(string),
+				Netmask: networkInterface["subnet_mask"].(string),
+				Gateway: networkInterface["gateway"].(string),
 			},
-			BootProtocol: d.Get(prefix + ".boot_proto").(string),
-			OnBoot:       strconv.FormatBool(d.Get(prefix + ".on_boot").(bool)),
-			Name:         d.Get(prefix + ".label").(string),
+			BootProtocol: networkInterface["boot_proto"].(string),
+			OnBoot:       strconv.FormatBool(networkInterface["on_boot"].(bool)),
+			Name:         networkInterface["label"].(string),
 		}
 		if i == 0 {
 			d.SetConnInfo(map[string]string{
-				"host": d.Get(prefix + ".ip_address").(string),
+				"host": networkInterface["ip_address"].(string),
 			})
 		}
 	}
@@ -210,10 +217,13 @@ func resourceVMCreate(d *schema.ResourceData, meta interface{}) error {
 			ReadOnly:            strconv.FormatBool(attachment["read_only"].(bool)),
 			UsesSCSIReservation: strconv.FormatBool(attachment["use_scsi_reservation"].(bool)),
 		}
-		err = newVM.AddLinkObject("diskattachments", diskAttachment, nil)
+		attachmentID, err := newVM.AddLinkObject("diskattachments", diskAttachment, nil)
+		v.(*schema.ResourceData).Set("attach_id", attachmentID)
 		if err != nil {
 			return err
 		}
+		log.Printf("Attachment ID: (%s)\n", attachmentID)
+		log.Printf("%v\n", attachment)
 	}
 
 	err = newVM.Start("", "", "", "true", "", nil)
@@ -254,6 +264,11 @@ func resourceVMRead(d *schema.ResourceData, meta interface{}) error {
 	d.Set("sockets", vm.CPU.Topology.Sockets)
 	d.Set("threads", vm.CPU.Topology.Threads)
 	d.Set("authorized_ssh_key", vm.Initialization.AuthorizedSSHKeys)
+
+	// for _, v := range d.Get("attached_disks").(*schema.Set).List() {
+	// 	attachment := v(map[string]interface{})
+	// }
+
 	return nil
 }
 
