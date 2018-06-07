@@ -43,3 +43,10 @@ resource "ovirt_disk" "joey_disk_1" {
   storage_domain_id = "cadbe661-0e35-4fcb-a70d-2b17e2559d9c"
   sparse            = true
 }
+
+resource "ovirt_datacenter" "jimmy_datacenter_1" {
+  name              = "jimmy_datacenter_1"
+  description      = "Test create datacenter" 
+  local            = false
+}
+
