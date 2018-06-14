@@ -7,9 +7,9 @@
 package ovirt
 
 import (
-	"github.com/EMSL-MSC/ovirtapi"
 	"github.com/hashicorp/terraform/helper/schema"
 	"github.com/hashicorp/terraform/terraform"
+	ovirtsdk4 "gopkg.in/imjoey/go-ovirt.v4"
 )
 
 // Provider returns oVirt provider configuration
@@ -35,15 +35,22 @@ func Provider() terraform.ResourceProvider {
 		},
 		ConfigureFunc: ConfigureProvider,
 		ResourcesMap: map[string]*schema.Resource{
-			"ovirt_vm":   resourceVM(),
-			"ovirt_disk": resourceDisk(),
+			"ovirt_vm":              resourceVM(),
+			"ovirt_disk":            resourceDisk(),
+			"ovirt_disk_attachment": resourceDiskAttachment(),
 		},
 		DataSourcesMap: map[string]*schema.Resource{
-			"ovirt_disk": dataSourceDisk(),
+			"ovirt_disk":        dataSourceDisk(),
+			"ovirt_datacenters": dataSourceOvirtDataCenters(),
 		},
 	}
 }
 
 func ConfigureProvider(d *schema.ResourceData) (interface{}, error) {
-	return ovirtapi.NewConnection(d.Get("url").(string), d.Get("username").(string), d.Get("password").(string), false)
+	return ovirtsdk4.NewConnectionBuilder().
+		URL(d.Get("url").(string)).
+		Username(d.Get("username").(string)).
+		Password(d.Get("password").(string)).
+		Insecure(true).
+		Build()
 }
