@@ -2,20 +2,36 @@ Terraform oVirt Provider plugin
 ===============================
 This plugin allows Terraform to work with the oVirt Virtual Machine management platform.
 
-Installing Terraform oVirt plugin
----------------------------------
 
-Prerequisites:
- * Install Go
- * Install Terraform
- * Set GOPATH (usually ~/go)
+Requirements
+------------
 
-Building/Installing:
+-	[Terraform](https://www.terraform.io/downloads.html) 0.11.x
+-	[Go](https://golang.org/doc/install) 1.9 (to build the provider plugin)
+
+
+Building The Provider
+---------------------
+
+Clone repository to: `$GOPATH/src/github.com/EMSL-MSC/terraform-provider-ovirt`
+
+```sh
+$ mkdir -p $GOPATH/src/github.com/EMSL-MSC
+$ cd $GOPATH/src/github.com/EMSL-MSC
+$ git clone git@github.com:sinokylin/terraform-provider-ovirt
 ```
-$ go get github.com/EMSL-MSC/terraform-provider-ovirt
-$ mkdir ~/.terraform.d/plugins
-$ cp $GOPATH/bin/terraform-provider-ovirt ~/.terraform.d/plugins
+
+Enter the provider directory and build the provider
+
+```sh
+$ cd $GOPATH/src/github.com/EMSL-MSC/terraform-provider-ovirt
+$ make build
 ```
+
+
+Using the provider
+------------------
+If you're building the provider, follow the instructions to [install it as a plugin.](https://www.terraform.io/docs/plugins/basics.html#installing-a-plugin) After placing it into your plugins directory,  run `terraform init` to initialize it.
 
 Provider Usage
 --------------
@@ -28,14 +44,21 @@ provider "ovirt" {
   password = "Password"
 }
 ```
-  * Username - (Required) The username to access the oVirt api including the profile used
+  * username - (Required) The username to access the oVirt api including the profile used
   * url - (Required) The url to the api endpoint (usually the ovirt server with a path of /ovirt-engine/api)
   * password - (Required) Password to access the server
 * Resources
   * ovirt_vm
   * ovirt_disk
+  * ovirt_disk_attachment
+  * ovirt_datacenter
+  * ovirt_network
 * Data Sources
-  * ovirt_disk
+  * ovirt_disks
+  * ovirt_datacenters
+  * ovirt_networks
+  * ovirt_clusters
+
 
 Disclaimer
 ---------
