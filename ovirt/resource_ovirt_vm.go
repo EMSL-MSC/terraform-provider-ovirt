@@ -29,10 +29,9 @@ func resourceOvirtVM() *schema.Resource {
 				Type:     schema.TypeString,
 				Required: true,
 			},
-			"cluster": {
+			"cluster_id": {
 				Type:     schema.TypeString,
-				Optional: true,
-				Default:  "Default",
+				Required: true,
 			},
 			"template": {
 				Type:     schema.TypeString,
@@ -63,14 +62,59 @@ func resourceOvirtVM() *schema.Resource {
 				Optional: true,
 				Default:  "",
 			},
+			"attached_disk": {
+				Type:     schema.TypeSet,
+				Required: true,
+				MinItems: 1,
+				Elem: &schema.Resource{
+					Schema: map[string]*schema.Schema{
+						"disk_id": &schema.Schema{
+							Type:     schema.TypeString,
+							Required: true,
+						},
+						"active": &schema.Schema{
+							Type:     schema.TypeBool,
+							Optional: true,
+							Default:  true,
+						},
+						"bootable": &schema.Schema{
+							Type:     schema.TypeBool,
+							Optional: true,
+							Default:  false,
+						},
+						"interface": &schema.Schema{
+							Type:     schema.TypeString,
+							Required: true,
+						},
+						"logical_name": &schema.Schema{
+							Type:     schema.TypeString,
+							Optional: true,
+						},
+						"pass_discard": &schema.Schema{
+							Type:     schema.TypeBool,
+							Optional: true,
+						},
+						"read_only": &schema.Schema{
+							Type:     schema.TypeBool,
+							Optional: true,
+							Default:  false,
+						},
+						"use_scsi_reservation": &schema.Schema{
+							Type:     schema.TypeBool,
+							Optional: true,
+							Default:  false,
+						},
+					},
+				},
+			},
 			"network_interface": {
-				Type:     schema.TypeList,
+				Type:     schema.TypeSet,
 				Required: true,
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
 						"label": &schema.Schema{
 							Type:     schema.TypeString,
-							Optional: true,
+							Required: true,
 						},
 						"network": &schema.Schema{
 							Type:     schema.TypeString,
@@ -78,7 +122,7 @@ func resourceOvirtVM() *schema.Resource {
 						},
 						"boot_proto": &schema.Schema{
 							Type:     schema.TypeString,
-							Optional: true,
+							Required: true,
 						},
 						"ip_address": &schema.Schema{
 							Type:     schema.TypeString,
@@ -109,7 +153,7 @@ func resourceOvirtVMCreate(d *schema.ResourceData, meta interface{}) error {
 	vmsService := conn.SystemService().VmsService()
 
 	cluster, err := ovirtsdk4.NewClusterBuilder().
-		Name(d.Get("cluster").(string)).Build()
+		Id(d.Get("cluster_id").(string)).Build()
 	if err != nil {
 		return err
 	}
@@ -173,9 +217,19 @@ func resourceOvirtVMCreate(d *schema.ResourceData, meta interface{}) error {
 		return err
 	}
 	newVM, ok := resp.Vm()
-	if ok {
-		d.SetId(newVM.MustId())
+	if !ok {
+		d.SetId("")
+		return nil
 	}
+	d.SetId(newVM.MustId())
+
+	vmService := conn.SystemService().VmsService().VmService(d.Id())
+	// Do attach disks
+	err = buildOvirtVMDiskAttachment(newVM.MustId(), d, meta)
+	if err != nil {
+		return err
+	}
+
 	for i := 0; i < numNetworks; i++ {
 		prefix := fmt.Sprintf("network_interface.%d", i)
 		profilesService := conn.SystemService().VnicProfilesService()
@@ -212,6 +266,12 @@ func resourceOvirtVMCreate(d *schema.ResourceData, meta interface{}) error {
 					MustBuild()).
 			Send()
 	}
+
+	// Try to start VM
+	_, err = vmService.Start().Send()
+	if err != nil {
+		return err
+	}
 	return resourceOvirtVMRead(d, meta)
 }
 
@@ -225,6 +285,10 @@ func resourceOvirtVMRead(d *schema.ResourceData, meta interface{}) error {
 	getVmresp, err := conn.SystemService().VmsService().
 		VmService(d.Id()).Get().Send()
 	if err != nil {
+		if _, ok := err.(*ovirtsdk4.NotFoundError); ok {
+			d.SetId("")
+			return nil
+		}
 		return err
 	}
 
@@ -239,16 +303,21 @@ func resourceOvirtVMRead(d *schema.ResourceData, meta interface{}) error {
 	d.Set("sockets", vm.MustCpu().MustTopology().MustSockets())
 	d.Set("threads", vm.MustCpu().MustTopology().MustThreads())
 	d.Set("authorized_ssh_key", vm.MustInitialization().MustAuthorizedSshKeys())
+	d.Set("cluster_id", vm.MustCluster().MustId())
 
-	// Use `conn.FollowLink` function to fetch cluster and template instance from a vm.
-	// See: https://github.com/imjoey/go-ovirt/blob/master/examples/follow_vm_links.go.
-	cluster, _ := conn.FollowLink(vm.MustCluster())
-	if cluster, ok := cluster.(*ovirtsdk4.Cluster); ok {
-		d.Set("cluster", cluster.MustName())
-	}
 	template, _ := conn.FollowLink(vm.MustTemplate())
 	if template, ok := template.(*ovirtsdk4.Template); ok {
 		d.Set("template", template.MustName())
+	}
+
+	if diskAttachments, ok := vm.DiskAttachments(); ok {
+		d.Set("attached_disk", flattenOvirtVMDiskAttachment(diskAttachments.Slice()))
+	}
+
+	if initialization, ok := vm.Initialization(); ok {
+		if nicConfigs, ok := initialization.NicConfigurations(); ok {
+			d.Set("network_interface", flattenOvirtVMNetworkInterface(nicConfigs.Slice()))
+		}
 	}
 
 	return nil
@@ -262,6 +331,9 @@ func resourceOvirtVMDelete(d *schema.ResourceData, meta interface{}) error {
 	return resource.Retry(3*time.Minute, func() *resource.RetryError {
 		getVMResp, err := vmService.Get().Send()
 		if err != nil {
+			if _, ok := err.(*ovirtsdk4.NotFoundError); ok {
+				return nil
+			}
 			return resource.RetryableError(err)
 		}
 
@@ -279,7 +351,7 @@ func resourceOvirtVMDelete(d *schema.ResourceData, meta interface{}) error {
 		}
 		//
 		_, err = vmService.Remove().
-			DetachOnly(true). // DetachOnly indicates without removing disks attachments
+			DetachOnly(true). // DetachOnly indicates without removing disks
 			Send()
 		if err != nil {
 			return resource.RetryableError(fmt.Errorf("Delete instalce timeout and got an error: %v", err))
@@ -288,4 +360,89 @@ func resourceOvirtVMDelete(d *schema.ResourceData, meta interface{}) error {
 		return nil
 
 	})
+}
+
+func buildOvirtVMDiskAttachment(vmID string, d *schema.ResourceData, meta interface{}) error {
+	conn := meta.(*ovirtsdk4.Connection)
+	vmService := conn.SystemService().VmsService().VmService(vmID)
+	attachmentSet := d.Get("attached_disk").(*schema.Set)
+	for _, v := range attachmentSet.List() {
+		attachment := v.(map[string]interface{})
+		diskService := conn.SystemService().DisksService().
+			DiskService(attachment["disk_id"].(string))
+		var disk *ovirtsdk4.Disk
+		err := resource.Retry(30*time.Second, func() *resource.RetryError {
+			getDiskResp, err := diskService.Get().Send()
+			if err != nil {
+				return resource.RetryableError(err)
+			}
+			disk = getDiskResp.MustDisk()
+			if disk.MustStatus() == ovirtsdk4.DISKSTATUS_LOCKED {
+				return resource.RetryableError(fmt.Errorf("disk is locked, wait for next check"))
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		_, err = vmService.DiskAttachmentsService().Add().
+			Attachment(
+				ovirtsdk4.NewDiskAttachmentBuilder().
+					Disk(disk).
+					Interface(ovirtsdk4.DiskInterface(attachment["interface"].(string))).
+					Bootable(attachment["bootable"].(bool)).
+					Active(attachment["active"].(bool)).
+					LogicalName(attachment["logical_name"].(string)).
+					PassDiscard(attachment["pass_discard"].(bool)).
+					ReadOnly(attachment["read_only"].(bool)).
+					UsesScsiReservation(attachment["use_scsi_reservation"].(bool)).
+					MustBuild()).
+			Send()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func flattenOvirtVMDiskAttachment(configured []*ovirtsdk4.DiskAttachment) []map[string]interface{} {
+	diskAttachments := make([]map[string]interface{}, len(configured))
+	for _, v := range configured {
+		attrs := make(map[string]interface{})
+		attrs["disk_id"] = v.MustDisk().MustId()
+		attrs["active"] = v.MustActive()
+		attrs["bootable"] = v.MustBootable()
+		attrs["interface"] = v.MustInterface()
+		attrs["logical_name"] = v.MustLogicalName()
+		attrs["pass_discard"] = v.MustPassDiscard()
+		attrs["read_only"] = v.MustReadOnly()
+		attrs["use_scsi_reservation"] = v.MustUsesScsiReservation()
+		diskAttachments = append(diskAttachments, attrs)
+	}
+	return diskAttachments
+}
+
+func flattenOvirtVMNetworkInterface(configured []*ovirtsdk4.NicConfiguration) []map[string]interface{} {
+	nicConfigs := make([]map[string]interface{}, len(configured))
+	for _, v := range configured {
+		attrs := make(map[string]interface{})
+		if name, ok := v.Name(); ok {
+			attrs["label"] = name
+		}
+		attrs["on_boot"] = v.MustOnBoot()
+		attrs["boot_proto"] = v.MustBootProtocol()
+		if ipAttrs, ok := v.Ip(); ok {
+			if ipAddr, ok := ipAttrs.Address(); ok {
+				attrs["ip_address"] = ipAddr
+			}
+			if netmask, ok := ipAttrs.Netmask(); ok {
+				attrs["subnet_mask"] = netmask
+			}
+			if gateway, ok := ipAttrs.Gateway(); ok {
+				attrs["gateway"] = gateway
+			}
+		}
+		nicConfigs = append(nicConfigs, attrs)
+	}
+	return nicConfigs
 }
