@@ -1,3 +1,5 @@
+This repository exists for historic reference. Ongoing development is done at https://github.com/ovirt/terraform-provider-ovirt
+
 Terraform oVirt Provider plugin
 ===============================
 This plugin allows Terraform to work with the oVirt Virtual Machine management platform.
